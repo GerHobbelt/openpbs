@@ -43,7 +43,7 @@ from tests.interfaces import *
 
 class TestPreemptParamsQmgr(TestInterfaces):
     """
-    This testsuite is for testing setting/unsetting of preemption paramaters
+    This testsuite is for testing setting/unsetting of preemption parameters
     that were moved from sched_config to the scheduler object.
     """
     UNAUTH = 1
