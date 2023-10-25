@@ -1768,6 +1768,9 @@ record_finish_exec(int sd)
 		if (sjr.sj_reservation == -1)
 			call_hup = HUP_INIT;
 #endif
+#if defined(PBS_SECURITY) && (PBS_SECURITY == KRB5)
+		AFSLOG_TERM(ptask);
+#endif
 		(void) sprintf(log_buffer, "job not started, %s %d",
 			       (sjr.sj_code == JOB_EXEC_RETRY) ? "Retry" : "Failure", sjr.sj_code);
 		exec_bail(pjob, sjr.sj_code, log_buffer);
@@ -3130,7 +3133,6 @@ finish_exec(job *pjob)
 	cpid = fork_me(-1);
 	if (cpid > 0) {
 		conn_t *conn = NULL;
-		char *s, *d, holdbuf[(2 * MAXPATHLEN) + 5];
 
 		/* the parent side, still the main man, uhh that is MOM */
 
@@ -3259,28 +3261,34 @@ finish_exec(job *pjob)
 			(void) close(ptc);
 			ptc = -1;
 		}
-		if (*pjob->ji_qs.ji_fileprefix != '\0')
-			sprintf(buf, "%s%s%s", path_jobs,
-				pjob->ji_qs.ji_fileprefix, JOB_SCRIPT_SUFFIX);
-		else
-			sprintf(buf, "%s%s%s", path_jobs,
-				pjob->ji_qs.ji_jobid, JOB_SCRIPT_SUFFIX);
-		if (chown(buf, pjob->ji_qs.ji_un.ji_momt.ji_exuid,
-			     pjob->ji_qs.ji_un.ji_momt.ji_exgid) == -1) 
-				log_errf(-1, __func__, "chown failed. ERR : %s",strerror(errno));				
 
-		/* add escape in front of brackets */
-		for (s = buf, d = holdbuf; *s && ((d - holdbuf) < sizeof(holdbuf)); s++, d++) {
-			if (*s == '[' || *s == ']')
-				*d++ = '\\';
-			*d = *s;
-		}
-		*d = '\0';
-		snprintf(buf, sizeof(buf), "%s", holdbuf);
-		DBPRT(("shell: %s\n", buf))
 #if SHELL_INVOKE == 1
 		if (is_interactive == 0) {
+			char *s;
+			char *d;
+			char holdbuf[(2 * MAXPATHLEN) + 5];
 			int k;
+
+			if (*pjob->ji_qs.ji_fileprefix != '\0')
+				sprintf(buf, "%s%s%s", path_jobs,
+					pjob->ji_qs.ji_fileprefix, JOB_SCRIPT_SUFFIX);
+			else
+				sprintf(buf, "%s%s%s", path_jobs,
+					pjob->ji_qs.ji_jobid, JOB_SCRIPT_SUFFIX);
+
+			if (chown(buf, pjob->ji_qs.ji_un.ji_momt.ji_exuid,
+					pjob->ji_qs.ji_un.ji_momt.ji_exgid) == -1)
+					log_errf(-1, __func__, "chown failed. ERR : %s",strerror(errno));
+
+			/* add escape in front of brackets */
+			for (s = buf, d = holdbuf; *s && ((d - holdbuf) < sizeof(holdbuf)); s++, d++) {
+				if (*s == '[' || *s == ']')
+					*d++ = '\\';
+				*d = *s;
+			}
+			*d = '\0';
+			snprintf(buf, sizeof(buf), "%s", holdbuf);
+			DBPRT(("shell: %s\n", buf))
 
 			/* pass name of shell script on pipe	*/
 			/* will be stdin of shell 		*/
@@ -3464,8 +3472,14 @@ finish_exec(job *pjob)
 	/* Second, the variables passed with the job.  They may */
 	/* be overwritten with new correct values for this job	*/
 
-	for (j = 0; j < vstrs->as_usedptr; ++j)
+	for (j = 0; j < vstrs->as_usedptr; ++j) {
+#if defined(PBS_SECURITY) && (PBS_SECURITY == KRB5)
+			/* never set KRB5CCNAME; it would rewrite the correct value */
+			if (strncmp(vstrs->as_string[j], "KRB5CCNAME", strlen("KRB5CCNAME")) == 0)
+				continue;
+#endif
 		bld_env_variables(&(pjob->ji_env), vstrs->as_string[j], NULL);
+	}
 
 	/* .. Next the critical variables: home, path, logname, ... */
 	/* these may replace some passed in with the job	    */
@@ -4666,6 +4680,9 @@ start_process(task *ptask, char **argv, char **envp, bool nodemux)
 		 */
 		set_globid(pjob, &sjr);
 		if (sjr.sj_code < 0) {
+#if defined(PBS_SECURITY) && (PBS_SECURITY == KRB5)
+			AFSLOG_TERM(ptask);
+#endif
 			(void) sprintf(log_buffer, "task not started, %s %s %d",
 				       (sjr.sj_code == JOB_EXEC_RETRY) ? "Retry" : "Failure",
 				       argv[0],
@@ -4746,8 +4763,14 @@ start_process(task *ptask, char **argv, char **envp, bool nodemux)
 	/* Next, the variables passed with the job.  They may   */
 	/* be overwritten with new correct values for this job	*/
 
-	for (j = 0; j < vstrs->as_usedptr; ++j)
+	for (j = 0; j < vstrs->as_usedptr; ++j) {
+#if defined(PBS_SECURITY) && (PBS_SECURITY == KRB5)
+			/* never set KRB5CCNAME; it would rewrite the correct value */
+			if (strncmp(vstrs->as_string[j], "KRB5CCNAME", strlen("KRB5CCNAME")) == 0)
+				continue;
+#endif
 		bld_env_variables(&(pjob->ji_env), vstrs->as_string[j], NULL);
+	}
 
 	/* HOME */
 	bld_env_variables(&(pjob->ji_env), variables_else[0],
