@@ -44,7 +44,7 @@
 %endif
 
 %if !%{defined pbs_version}
-%define pbs_version 22.05.11
+%define pbs_version 23.06.06
 %endif
 
 %if !%{defined pbs_release}
@@ -129,7 +129,9 @@ BuildRequires: libXext-devel
 BuildRequires: libXft-devel
 BuildRequires: fontconfig
 BuildRequires: timezone
+%if ( ( !%{defined sle_version} ) || ( 0%{?sle_version} < 150500 ) )
 BuildRequires: python-xml
+%endif
 %else
 BuildRequires: expat-devel
 BuildRequires: openssl-devel
