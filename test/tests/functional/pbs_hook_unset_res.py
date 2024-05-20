@@ -40,7 +40,7 @@
 
 from tests.functional import *
 
-hook_body = """
+hook_body_modifyjob = """
 import pbs
 e = pbs.event()
 j = e.job
@@ -48,6 +48,14 @@ select = "1:ncpus=1:mem=10m"
 j.Resource_List['ncpus'] = None
 j.Resource_List['select'] = pbs.select(select)
 j.comment = "Modified this job"
+"""
+
+hook_body_node_res_unset = """
+import pbs
+e = pbs.event()
+vnl = pbs.event().vnode_list
+local_node = pbs.get_local_nodename()
+vnl[local_node].resources_available["foo"] = None
 """
 
 
@@ -60,7 +68,7 @@ class TestHookUnsetRes(TestFunctional):
         hook_name = "myhook"
         a = {'event': 'modifyjob', 'enabled': 'True'}
         rv = self.server.create_import_hook(
-            hook_name, a, hook_body, overwrite=True)
+            hook_name, a, hook_body_modifyjob, overwrite=True)
         self.assertTrue(rv)
         self.server.manager(MGR_CMD_SET, SERVER, {'log_events': 2047})
         j = Job(TEST_USER, attrs={
@@ -68,3 +76,37 @@ class TestHookUnsetRes(TestFunctional):
         jid = self.server.submit(j)
         self.server.expect(JOB, {'job_state': 'H'}, id=jid)
         self.server.alterjob(jid, {'Resource_List.ncpus': '2'})
+
+    def test_node_res_unset_hook(self):
+        """
+        Unsetting custom node resource via hook and test
+        the resource can be set again on the node.
+        """
+        a = {'type': 'string', 'flag': 'h'}
+        r = 'foo'
+        self.server.manager(MGR_CMD_CREATE, RSC, a, id=r)
+
+        vnode = self.mom.shortname
+        self.server.manager(
+            MGR_CMD_SET, NODE,
+            {'resources_available.foo': 'bar'},
+            id=vnode,
+            runas=ROOT_USER)
+
+        hook_name = "node_res_unset"
+        a = {'event': 'exechost_periodic',
+             'enabled': 'True',
+             'freq': 10}
+        rv = self.server.create_import_hook(
+            hook_name, a, hook_body_node_res_unset, overwrite=True)
+        self.assertTrue(rv)
+
+        msg = 'resource resources_available.foo= per mom hook request'
+        self.server.log_match(msg, starttime=time.time())
+
+        rc = self.server.manager(
+            MGR_CMD_SET, NODE,
+            {'resources_available.foo': 'bar'},
+            id=vnode,
+            runas=ROOT_USER)
+        self.assertEqual(rc, 0)

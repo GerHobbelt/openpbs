@@ -1,5 +1,5 @@
+# coding: utf-8
 
-#
 # Copyright (C) 1994-2021 Altair Engineering, Inc.
 # For more information, contact Altair at www.altair.com.
 #
@@ -37,22 +37,36 @@
 # "OpenPBS®", "PBS Professional®", and "PBS Pro™" and Altair's logos is
 # subject to Altair's trademark licensing policies.
 
-#
-if KRB5_ENABLED
 
-lib_LTLIBRARIES = libauth_gss.la
+from tests.functional import *
 
-libauth_gss_la_CPPFLAGS = \
-	-I$(top_srcdir)/src/include \
-	@KRB5_CFLAGS@
+hook_body_node_attr_alter = """
+import pbs
+e = pbs.event()
+vnl = pbs.event().vnode_list
+local_node = pbs.get_local_nodename()
+vnl[local_node].Mom = None
+vnl[local_node].Port = 123
+"""
 
-libauth_gss_la_LDFLAGS = -version-info 0:0:0
 
-libauth_gss_la_LIBADD= \
-	@KRB5_LIBS@ \
-	-lpthread
+class TestHookSetAttr(TestFunctional):
 
-libauth_gss_la_SOURCES = \
-	pbs_gss.c
+    def test_node_ro_attr_hook(self):
+        """
+        Try to alter RO node attributes from hook and check
+        the attributes are protected to the write.
+        """
+        hook_name = "node_attr_ro"
+        a = {'event': 'exechost_periodic',
+             'enabled': 'True',
+             'freq': 3}
+        rv = self.server.create_import_hook(
+            hook_name, a, hook_body_node_attr_alter, overwrite=True)
+        self.assertTrue(rv)
 
-endif
+        msg = 'Error 15003 setting attribute Mom in update from mom hook'
+        self.server.log_match(msg, starttime=time.time())
+
+        msg = 'Error 15003 setting attribute Port in update from mom hook'
+        self.server.log_match(msg, starttime=time.time())
