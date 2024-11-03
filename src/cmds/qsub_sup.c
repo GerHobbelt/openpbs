@@ -209,6 +209,33 @@ get_conf_path(void)
 
 /**
  * @brief
+ *      Check the line does not end with win cr,lf.
+ *
+ * @param[in]	s	- input line
+ *
+ * @return      int
+ * @retval -1 - input error
+ * @retval 0 - unix
+ * @retval 1 - win (cr, lf)
+ */
+int
+check_crlf(char * s)
+{
+	if (s == NULL) {
+		return -1;
+	}
+	int len = strlen(s);
+	if (len == 0) {
+		return 0;
+	}
+	if (len > 1 && s[len - 2] == '\r' && s[len - 1] == '\n') {
+		return 1;
+	}
+	return 0;
+}
+
+/**
+ * @brief
  *      Create a temporary file that will house the job script
  *
  * @param[in]	file	- Input file pointer
@@ -289,6 +316,15 @@ get_script(FILE *file, char *script, char *prefix)
 		} else if (!exec && pbs_isexecutable(s_in)) {
 			exec = TRUE;
 		}
+#ifndef WIN32
+		if (check_crlf(in)) {
+			fprintf(stderr, "qsub: script contains cr, lf\n");
+			fclose(TMP_FILE);
+			free(extend_in);
+			free(s_in);
+			return (5);
+		}
+#endif
 		if (fputs(in, TMP_FILE) < 0) {
 			perror("fputs");
 			fprintf(stderr, "qsub: error writing copy of script, %s\n",
@@ -1424,7 +1460,7 @@ get_comm_filename(char *fname)
 
 	count = snprintf(fname, MAXPIPENAME, "%s/pbs_%.16s_%lu_%.8s_%.32s_%.16s_%.5s",
 			 tmpdir,
-			 ((server_out == NULL || server_out[0] == 0) ? "default" : server_out),
+			 server_out[0] == '\0' ? "default" : server_out,
 			 (unsigned long int) getuid(),
 			 cred_name,
 			 get_conf_path(),
@@ -1434,7 +1470,7 @@ get_comm_filename(char *fname)
 	if (count >= MAXPIPENAME) {
 		count = snprintf(fname, MAXPIPENAME, "%s/pbs_", TMP_DIR);
 		len = snprintf(buf, MAXPIPENAME, "%.16s_%lu_%.8s_%.32s_%.16s_%.5s",
-			       ((server_out == NULL || server_out[0] == 0) ? "default" : server_out),
+			       server_out[0] == '\0' ? "default" : server_out,
 			       (unsigned long int) getuid(),
 			       cred_name,
 			       get_conf_path(),
