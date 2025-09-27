@@ -2793,7 +2793,7 @@ handle_attribute_errors(struct ecl_attribute_errors *err_list, char *retmsg)
  *
  * @return int
  * @retval 0 - Success
- * @retval 1/pbs_errno - Failure, retmsg paramter is set
+ * @retval 1/pbs_errno - Failure, retmsg parameter is set
  *
  */
 int
@@ -2852,7 +2852,7 @@ do_connect(char *server_out, char *retmsg)
  *
  * @return int
  * @retval 0 - Success
- * @retval 1/-1/pbs_errno - Failure, retmsg paramter is set
+ * @retval 1/-1/pbs_errno - Failure, retmsg parameter is set
  * @retval DMN_REFUSE_EXIT - If daemon can't submit the job
  *
  */

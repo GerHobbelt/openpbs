@@ -280,7 +280,7 @@ class TestPbsNodeRampDownKeepSelect(TestFunctional):
     def get_mom_vn_execvn(self, execvnode):
         """
         will get vnode list and corresponding mom list from
-        the execvnode paramter
+        the execvnode parameter
         """
         mlist = []
         vlist = []

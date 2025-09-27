@@ -246,7 +246,7 @@ typedef struct postgres_db_fn pg_db_fn_t;
  * SET_PARAM_BIGINT  - Loads BIGINT value to postgres parameter at index "i"
  * SET_PARAM_BIN     - Loads a BINARY value to postgres parameter at index "i"
  *
- * Basically there are 3 values that need to be supplied for every paramter
+ * Basically there are 3 values that need to be supplied for every parameter
  * of any prepared sql statement. They are:
  *	1) The value - The value to be "bound/loaded" to the parameter. This
  *			is the adress of the variable which holds the value.
