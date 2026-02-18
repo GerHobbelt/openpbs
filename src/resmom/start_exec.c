@@ -2832,6 +2832,10 @@ finish_exec(job *pjob)
 	FILE *temp_stderr = stderr;
 	vnl_t *vnl_fails = NULL;
 	vnl_t *vnl_good = NULL;
+	struct sigaction tmp_act_hup;
+	struct sigaction tmp_act_int;
+	struct sigaction tmp_act_quit;
+	struct sigaction tmp_act_stp;
 
 	ptc = -1; /* No current master pty */
 
@@ -3609,6 +3613,7 @@ finish_exec(job *pjob)
 		char *termtype;
 		char *phost;
 		char *auth_method;
+		char *encrypt_method;
 		int qsub_sock;
 		int old_qsub_sock;
 		int pts; /* fd for slave pty */
@@ -3620,6 +3625,14 @@ finish_exec(job *pjob)
 		/*************************************************************************/
 
 		sigemptyset(&act.sa_mask);
+		/* prevent user from interrupting start of the job */
+		act.sa_flags = 0;
+		act.sa_handler = SIG_IGN;
+		(void) sigaction(SIGHUP, &act, &tmp_act_hup);
+		(void) sigaction(SIGINT, &act, &tmp_act_int);
+		(void) sigaction(SIGQUIT, &act, &tmp_act_quit);
+		(void) sigaction(SIGTSTP, &act, &tmp_act_stp);
+
 #ifdef SA_INTERRUPT
 		act.sa_flags = SA_INTERRUPT;
 #else
@@ -3649,6 +3662,16 @@ finish_exec(job *pjob)
 		if ((auth_method == NULL) ||
 		    ((auth_method = strchr(auth_method, (int) '=')) == NULL)) {
 			log_joberr(-1, __func__, "PBS_O_INTERACTIVE_AUTH_METHOD not set",
+				   pjob->ji_qs.ji_jobid);
+			starter_return(upfds, downfds, JOB_EXEC_FAIL1, &sjr);
+		}
+
+		/* get qsub prefered encrypt method */
+
+		encrypt_method = arst_string("PBS_O_INTERACTIVE_ENCRYPT_METHOD", get_jattr(pjob, JOB_ATR_variables));
+		if ((encrypt_method == NULL) ||
+		    ((encrypt_method = strchr(encrypt_method, (int) '=')) == NULL)) {
+			log_joberr(-1, __func__, "PBS_O_INTERACTIVE_ENCRYPT_METHOD not set",
 				   pjob->ji_qs.ji_jobid);
 			starter_return(upfds, downfds, JOB_EXEC_FAIL1, &sjr);
 		}
@@ -3707,18 +3730,24 @@ finish_exec(job *pjob)
 		}
 
 		ret = auth_with_qsub(qsub_sock, get_jattr_long(pjob, JOB_ATR_interactive),
-				     phost + 1, auth_method + 1, pjob->ji_qs.ji_jobid);
+				     phost + 1, auth_method + 1, encrypt_method + 1, pjob->ji_qs.ji_jobid);
 		if (ret != INTERACTIVE_AUTH_SUCCESS) {
 			log_event(PBSEVENT_ERROR, PBS_EVENTCLASS_JOB, LOG_ERR, pjob->ji_qs.ji_jobid, "Failed to authenticate with qsub");
 			starter_return(upfds, downfds, JOB_EXEC_FAIL1, &sjr);
 		}
 
 		/* send job id as validation to qsub */
-
-		if (CS_write(qsub_sock, pjob->ji_qs.ji_jobid, PBS_MAXSVRJOBID + 1) !=
-		    PBS_MAXSVRJOBID + 1) {
-			log_err(errno, __func__, "cannot write jobid");
-			starter_return(upfds, downfds, JOB_EXEC_FAIL1, &sjr);
+		if (transport_chan_get_ctx_status(qsub_sock, FOR_ENCRYPT) == (int) AUTH_STATUS_CTX_READY) {
+			if (transport_send_pkt(qsub_sock, AUTH_ENCRYPTED_DATA, pjob->ji_qs.ji_jobid, PBS_MAXSVRJOBID + 1) < 0) {
+				log_err(errno, __func__, "cannot write jobid");
+				starter_return(upfds, downfds, JOB_EXEC_FAIL1, &sjr);
+			}
+		} else {
+			if (CS_write(qsub_sock, pjob->ji_qs.ji_jobid, PBS_MAXSVRJOBID + 1) !=
+				PBS_MAXSVRJOBID + 1) {
+				log_err(errno, __func__, "cannot write jobid");
+				starter_return(upfds, downfds, JOB_EXEC_FAIL1, &sjr);
+			}
 		}
 
 		/* receive terminal type and window size */
@@ -3790,7 +3819,13 @@ finish_exec(job *pjob)
 				}
 			}
 
-			int res = mom_writer(qsub_sock, ptc);
+			int res;
+			if (transport_chan_get_ctx_status(qsub_sock, FOR_ENCRYPT) == (int) AUTH_STATUS_CTX_READY) {
+				res = mom_writer_pkt(qsub_sock, ptc);
+			} else {
+				res = mom_writer(qsub_sock, ptc);
+			}
+
 			/* Inside mom_writer, if read is successful and write fails then it is an error and hence logging here as error for -1 */
 			if (res == -1)
 				log_eventf(PBSEVENT_ERROR, PBS_EVENTCLASS_JOB, LOG_ERR, pjob->ji_qs.ji_jobid, "CS_write failed with errno %d", errno);
@@ -3971,18 +4006,23 @@ finish_exec(job *pjob)
 						if (strcmp(auth_method+1, AUTH_RESVPORT_NAME) == 0) {
 							port_forwarder(socks, conn_qsub_resvport, phost + 1,
 									get_jattr_long(pjob, JOB_ATR_X11_port),
-									qsub_sock, mom_reader_Xjob,
+									qsub_sock, mom_get_reader_Xjob,
 									log_mom_portfw_msg,
-									EXEC_HOST_SIDE, auth_method+1, pjob->ji_qs.ji_jobid);
+									EXEC_HOST_SIDE, auth_method+1, encrypt_method+1, pjob->ji_qs.ji_jobid);
 						} else {
 							port_forwarder(socks, conn_qsub, phost + 1,
 									get_jattr_long(pjob, JOB_ATR_X11_port),
-									qsub_sock, mom_reader_Xjob,
+									qsub_sock, mom_get_reader_Xjob,
 									log_mom_portfw_msg,
-									EXEC_HOST_SIDE, auth_method+1, pjob->ji_qs.ji_jobid);
+									EXEC_HOST_SIDE, auth_method+1, encrypt_method+1, pjob->ji_qs.ji_jobid);
 						}
 					} else {
-						int res = mom_reader(qsub_sock, ptc, buf);
+						int res;
+						if (transport_chan_get_ctx_status(qsub_sock, FOR_ENCRYPT) == (int) AUTH_STATUS_CTX_READY) {
+							res = mom_reader_pkt(qsub_sock, ptc, buf);
+						} else {
+							res = mom_reader(qsub_sock, ptc, buf);
+						}
 						/* Inside mom_reader, if read is successful and write fails then it is an error and hence logging here as error for -1 */
 						if (res == -1)
 							log_eventf(PBSEVENT_ERROR, PBS_EVENTCLASS_JOB, LOG_ERR, pjob->ji_qs.ji_jobid, "Write failed with errno %d", errno);
@@ -4557,6 +4597,12 @@ finish_exec(job *pjob)
 		the_env = pjob->ji_env.v_envp;
 		*(pjob->ji_env.v_envp + pjob->ji_env.v_used) = NULL;
 
+		/* user was prevented to interrupt, it is safe to revert now */
+		(void) sigaction(SIGHUP, &tmp_act_hup, NULL);
+		(void) sigaction(SIGINT, &tmp_act_int, NULL);
+		(void) sigaction(SIGQUIT, &tmp_act_quit, NULL);
+		(void) sigaction(SIGTSTP, &tmp_act_stp, NULL);
+
 		execve(the_progname, the_argv, the_env);
 		free(progname);
 		free_attrlist(&argv_list);
@@ -4586,6 +4632,12 @@ finish_exec(job *pjob)
 			shellname = shell;
 		arg[0] = shellname;
 		arg[1] = NULL;
+
+		/* user was prevented to interrupt, it is safe to revert now */
+		(void) sigaction(SIGHUP, &tmp_act_hup, NULL);
+		(void) sigaction(SIGINT, &tmp_act_int, NULL);
+		(void) sigaction(SIGQUIT, &tmp_act_quit, NULL);
+		(void) sigaction(SIGTSTP, &tmp_act_stp, NULL);
 
 		/* we're purposely not calling log_close() here */
 		/* for this causes a side-effect. log_close() would */
